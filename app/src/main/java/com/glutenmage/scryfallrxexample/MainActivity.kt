@@ -5,46 +5,26 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import android.util.Log
 import android.view.Menu
 import androidx.appcompat.widget.SearchView
 import androidx.cursoradapter.widget.CursorAdapter
 import androidx.cursoradapter.widget.SimpleCursorAdapter
-import com.bumptech.glide.Glide
 import com.glutenmage.scryfall.models.AutocompleteResult
 import com.glutenmage.scryfallrx.ScryfallRx
-import io.reactivex.android.schedulers.AndroidSchedulers
-import io.reactivex.disposables.CompositeDisposable
-import io.reactivex.subjects.PublishSubject
 import kotlinx.android.synthetic.main.activity_main.*
-import java.util.concurrent.TimeUnit
-
 
 class MainActivity : AppCompatActivity() {
     private val TAG = "MainActivity"
-    private lateinit var scryfallRx: ScryfallRx
-    private var disposable = CompositeDisposable()
-    private var searchChanged = PublishSubject.create<String>()
     private lateinit var searchView: SearchView
     private var autocompleteResult: AutocompleteResult = AutocompleteResult(emptyArray())
+    private lateinit var viewModel: MainActivityViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        scryfallRx = ScryfallRx(application)
-        random()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        disposable.dispose()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        disposable.add(searchChanged.debounce(100, TimeUnit.MILLISECONDS)
-            .subscribe {
-                autocomplete(it)
-            })
+        viewModel = MainActivityViewModel(lifecycle, ScryfallRx(application))
+        viewModel.addObserver { updateState(it) }
+        viewModel.performAction(MainActivityViewModel.Action.Random)
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -57,7 +37,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onQueryTextChange(newText: String?): Boolean {
-                    newText?.let {searchChanged.onNext(newText)}
+                    newText?.let {viewModel.performAction(MainActivityViewModel.Action.Autocomplete(it))}
                 return true
             }
 
@@ -66,7 +46,7 @@ class MainActivity : AppCompatActivity() {
             override fun onSuggestionSelect(position: Int): Boolean {return true}
 
             override fun onSuggestionClick(position: Int): Boolean {
-                search(autocompleteResult.data[position])
+                viewModel.performAction(MainActivityViewModel.Action.Search(autocompleteResult.data[position]))
                 return true
             }
         })
@@ -74,38 +54,23 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun random() {
-        disposable.add(scryfallRx.random()
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribe ({
-                Glide.with(this).load(it.imageUris.png).into(image)
-            }, {}))
-    }
-
-    private fun autocomplete(query: String){
-        disposable.add(scryfallRx.autoComplete(query)
-            .observeOn(AndroidSchedulers.mainThread())
-            .onErrorReturn { AutocompleteResult(emptyArray())}
-            .subscribe ({
-                autocompleteResult  = it
+    private fun updateState(state: MainActivityViewModel.MainActivityViewModelState) {
+        when (state){
+            is MainActivityViewModel.MainActivityViewModelState.FetchSuccess -> {
+                GlideApp.with(this)
+                    .load(state.cardModel.imageUris.large)
+                    .into(image)
+            }
+            is MainActivityViewModel.MainActivityViewModelState.AutoCompleteSuccess -> {
+                autocompleteResult = state.autocompleteResult
                 if (searchView.suggestionsAdapter == null) {
                     searchView.suggestionsAdapter = AutocompleteAdapter(searchView.context, autocompleteResult)
                 } else {
                     searchView.suggestionsAdapter.changeCursor(AutocompleteCursor.Build(autocompleteResult))
                 }
-            }, {
-                if (searchView.suggestionsAdapter != null) {
-                    searchView.suggestionsAdapter.changeCursor(AutocompleteCursor.Build(AutocompleteResult(emptyArray())))
-                }
-            }))
-    }
+            }
+        }
 
-    private fun search(query: String) {
-        disposable.add(scryfallRx.cardNamed(query)
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribe(
-                {Glide.with(this).load(it.imageUris.png).into(image)},
-                {}))
     }
 
     class AutocompleteCursor{
@@ -129,5 +94,4 @@ class MainActivity : AppCompatActivity() {
             arrayOf("names"),
             intArrayOf(R.id.itemTextView),
             CursorAdapter.FLAG_REGISTER_CONTENT_OBSERVER)
-
 }
