@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ScryfallRxExample</string>
+    <string name="search_hint">Card Name</string>
+</resources>
